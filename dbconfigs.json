@@ -1,0 +1,51 @@
+{
+  "5C9KnPvhhmQh": {
+    "user": "personal-ed_dentalkids",
+    "password": "bLiXmhi!LsSXQ497",
+    "server": "192.195.56.23",
+    "database": "EDW_DENTALKIDS_PRD",
+    "database-prs": "EDW_DENTALKIDS_PERSONAL_ED_PRD"
+  },
+  "ChYNf3SCtMA1": {
+    "user": "personal-ed_oralcorp",
+    "password": "r@9tELamJCRj_j8n",
+    "server": "192.195.56.23",
+    "database": "EDW_ORALCORP_PRD",
+    "database-prs": "EDW_ORALCORP_PERSONAL_ED_PRD"
+  },
+  "V8fG1u9Tj3gL": {
+    "user": "personal-ed_coe",
+    "password": "d9uPSUz8!2@eCB2v",
+    "server": "192.195.56.23",
+    "database": "EDW_COE_PRD",
+    "database-prs": "EDW_COE_PERSONAL_ED_PRD"
+  },
+  "9r2q5Mp1FbQU": {
+    "user": "personal-ed_agami",
+    "password": "vR814JpKsQMXFzm!",
+    "server": "192.195.56.23",
+    "database": "EDW_AGAMI_PRD",
+    "database-prs": "EDW_AGAMI_PERSONAL_ED_PRD"
+  },
+  "udc8CnBxS5wj": {
+    "user": "personal-ed_atelie",
+    "password": "UZVH@8BB!_4PTzdH",
+    "server": "192.195.56.23",
+    "database": "WEDS_AtelieOral_PRD",
+    "database-prs": "EDW_ATELIEORAL_PERSONAL_ED_PRD"
+  },
+  "ZViuAU6KUz6T": {
+    "user": "personal-ed_redecosb",
+    "password": "_gw6dTaamApn65oA",
+    "server": "192.195.56.23",
+    "database": "WEDS_REDE_COSB_PRD",
+    "database-prs": "EDW_REDE_COSB_PERSONAL_ED_PRD"
+  },
+  "JmT6vyczX5re": {
+    "user": "personal-ed_cosb",
+    "password": "knTSN6_EAP4YU6iq",
+    "server": "192.195.56.23",
+    "database": "WEDS_COSB_PRD",
+    "database-prs": "EDW_COSB_PERSONAL_ED_PRD"
+  }
+}
