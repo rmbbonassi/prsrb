@@ -1,5 +1,7 @@
 const express = require('express');
 const sql = require('mssql');
+const dbConfigs = require('./dbconfigs.json'); // Agora o JSON externo é carregado
+
 const app = express();
 const port = process.env.PORT || 3000;
 
@@ -8,7 +10,7 @@ const API_SECRET = process.env.API_SECRET;
 
 app.use(express.json());
 
-// Middleware para autenticação
+// Middleware de autenticação
 app.use((req, res, next) => {
   const token = req.headers['x-api-key'];
   if (token !== API_SECRET) {
@@ -17,25 +19,33 @@ app.use((req, res, next) => {
   next();
 });
 
-// Rota para consulta SQL
+// Rota de consulta SQL com suporte multi-cliente
 app.post('/query', async (req, res) => {
-  const { query } = req.body;
+  const { clientId, query } = req.body;
 
-  const config = {
-    user: process.env.SQL_USER,
-    password: process.env.SQL_PASSWORD,
-    server: process.env.SQL_SERVER,
-    database: process.env.SQL_DATABASE,
-    options: {
-      encrypt: true,
-      trustServerCertificate: true
-    }
-  };
+  const config = dbConfigs[clientId];
+
+  if (!config) {
+    return res.status(400).send('Cliente não encontrado ou não autorizado');
+  }
 
   try {
-    await sql.connect(config);
+    await sql.connect({
+      user: config.user,
+      password: config.password,
+      server: config.server,
+      database: config.database,
+      options: {
+        encrypt: true,
+        trustServerCertificate: true
+      }
+    });
+
     const result = await sql.query(query);
-    res.json(result.recordset);
+    res.json({
+      records: result.recordset,
+      "database-prs": config["database-prs"]
+    });
   } catch (err) {
     console.error(err);
     res.status(500).send(err.message);
@@ -43,5 +53,5 @@ app.post('/query', async (req, res) => {
 });
 
 app.listen(port, () => {
-  console.log(`API rodando na porta ${port}`);
+  console.log(`API Multi-Cliente rodando na porta ${port}`);
 });
