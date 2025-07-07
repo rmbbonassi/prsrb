@@ -1,11 +1,11 @@
 const express = require('express');
 const sql = require('mssql');
-const dbConfigs = require('./dbconfigs.json'); // Agora o JSON externo é carregado
+const dbConfigs = require('./dbconfigs.json');  // Agora carrega o dbconfigs.json corretamente
 
 const app = express();
 const port = process.env.PORT || 3000;
 
-// Token secreto
+// Token secreto (continua nas variáveis de ambiente)
 const API_SECRET = process.env.API_SECRET;
 
 app.use(express.json());
@@ -19,7 +19,7 @@ app.use((req, res, next) => {
   next();
 });
 
-// Rota de consulta SQL com suporte multi-cliente
+// Rota para consultas SQL (multi-cliente)
 app.post('/query', async (req, res) => {
   const { clientId, query } = req.body;
 
