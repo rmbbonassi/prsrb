@@ -43,8 +43,7 @@ app.post('/query', async (req, res) => {
 
     const result = await sql.query(query);
     res.json({
-      records: result.recordset,
-      "database-prs": config["database-prs"]
+      records: result.recordset
     });
   } catch (err) {
     console.error(err);
