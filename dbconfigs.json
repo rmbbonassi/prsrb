@@ -47,5 +47,13 @@
     "server": "192.195.56.23",
     "database": "WEDS_COSB_PRD",
     "database-prs": "EDW_COSB_PERSONAL_ED_PRD"
+  },
+  "Xd15CAxbw0q1": {
+    "user": "personal_user",
+    "password": "Cxy4ni6b#61ic3Cj",
+    "server": "A2NWPLSK14SQL-v02.shr.prod.iad2.secureserver.net",
+    "database": "personalreg",
+    "database-prs": "xxxx"
   }
+
 }
