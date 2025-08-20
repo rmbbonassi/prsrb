@@ -1,0 +1,8 @@
+set API_SECRET=c5dd1e822c6c6d33ea712b756d9176ac
+set SQL_USER=personal-ed_atelie
+set SQL_PASSWORD=UZVH@8BB!_4PTzdH
+set SQL_SERVER=192.195.56.23
+set SQL_DATABASE=WEDS_AtelieOral_PRD
+node index.js
+
+PAUSE
