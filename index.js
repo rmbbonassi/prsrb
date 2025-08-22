@@ -1,6 +1,14 @@
 const express = require('express');
 const sql = require('mssql');
-const dbConfigs = require('./dbconfigs.json');
+
+// 🔒 Carrega configs da variável de ambiente
+let dbConfigs;
+try {
+  dbConfigs = JSON.parse(process.env.DBCONFIG_JSON);
+} catch (err) {
+  console.error("Erro ao carregar variável DBCONFIG_JSON:", err.message);
+  process.exit(1);
+}
 
 const app = express();
 const port = process.env.PORT || 3000;
@@ -19,7 +27,7 @@ app.use((req, res, next) => {
   next();
 });
 
-// Rota para consultas SQL (multi-cliente, agora com fechamento de conexão)
+// Rota para consultas SQL
 app.post('/query', async (req, res) => {
   const { clientId, query } = req.body;
 
@@ -42,14 +50,11 @@ app.post('/query', async (req, res) => {
     });
 
     const result = await sql.query(query);
-    res.json({
-      records: result.recordset
-    });
+    res.json({ records: result.recordset });
   } catch (err) {
     console.error(err);
     res.status(500).send(err.message);
   } finally {
-    // Fecha a conexão após cada requisição para evitar reuso incorreto
     await sql.close();
   }
 });
