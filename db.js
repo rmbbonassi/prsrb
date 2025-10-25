@@ -47,16 +47,54 @@ async function getPool(clientId, cfg, dbName) {
 }
 
 /**
- * Executa uma query **obrigando** a presença do filtro por conta:
- *   - O texto SQL DEVE conter o placeholder "@id_conta" (senão lança erro).
- *   - O valor de id_conta é obtido do DBCONFIG_JSON pelo clientId.
- *   - A database usada é escolhida por targetDbKey:
- *       'database'      → cfg.database
- *       'database-prs'  → cfg['database-prs']
- *
+ * Escolhe a database a partir do cfg e da key:
+ *   - 'database'      → cfg.database
+ *   - 'database-prs'  → cfg['database-prs']
+ */
+function resolveDbName(cfg, targetDbKey = 'database') {
+  return cfg[targetDbKey] || cfg.database;
+}
+
+/**
+ * queryByClient (LIVRE) — NÃO obriga @id_conta.
+ * Para uso no /query temporário. ATENÇÃO: use apenas em ambiente controlado.
  * params aceita:
  *   { nome: { type: sql.VarChar(120), value: 'x' }, ... }
  *   ou { nome: valorSimples }
+ */
+async function queryByClient(dbConfigs, clientId, sqlText, params = {}, targetDbKey = 'database') {
+  const cfg = dbConfigs[clientId];
+  if (!cfg) {
+    const e = new Error('Cliente não encontrado');
+    e.status = 400;
+    throw e;
+  }
+
+  const dbName = resolveDbName(cfg, targetDbKey);
+  if (!dbName) {
+    const e = new Error(`Database não configurada (${targetDbKey}) para clientId=${clientId}`);
+    e.status = 500;
+    throw e;
+  }
+
+  const pool = await getPool(clientId, cfg, dbName);
+  const req = pool.request();
+
+  for (const [k, def] of Object.entries(params)) {
+    if (def && typeof def === 'object' && 'type' in def) {
+      req.input(k, def.type, def.value);
+    } else {
+      req.input(k, def);
+    }
+  }
+
+  return req.query(sqlText);
+}
+
+/**
+ * queryByClientForced (SEGURA) — OBRIGA @id_conta.
+ * - O texto SQL DEVE conter o placeholder "@id_conta" (senão lança erro).
+ * - O valor de id_conta é obtido do DBCONFIG_JSON pelo clientId.
  */
 async function queryByClientForced(dbConfigs, clientId, sqlText, params = {}, targetDbKey = 'database') {
   const cfg = dbConfigs[clientId];
@@ -83,8 +121,7 @@ async function queryByClientForced(dbConfigs, clientId, sqlText, params = {}, ta
   // Injeta @id_conta SEMPRE a partir do cfg (nunca do usuário)
   params.id_conta = { type: sql.Int, value: Number(idConta) };
 
-  // Escolhe database pelo targetDbKey
-  const dbName = cfg[targetDbKey] || cfg.database;
+  const dbName = resolveDbName(cfg, targetDbKey);
   if (!dbName) {
     const e = new Error(`Database não configurada (${targetDbKey}) para clientId=${clientId}`);
     e.status = 500;
@@ -94,7 +131,6 @@ async function queryByClientForced(dbConfigs, clientId, sqlText, params = {}, ta
   const pool = await getPool(clientId, cfg, dbName);
   const req = pool.request();
 
-  // Faz o bind de todos os parâmetros
   for (const [k, def] of Object.entries(params)) {
     if (def && typeof def === 'object' && 'type' in def) {
       req.input(k, def.type, def.value);
@@ -106,4 +142,4 @@ async function queryByClientForced(dbConfigs, clientId, sqlText, params = {}, ta
   return req.query(sqlText);
 }
 
-module.exports = { sql, queryByClientForced };
+module.exports = { sql, queryByClient, queryByClientForced };
