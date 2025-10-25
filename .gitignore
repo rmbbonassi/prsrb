@@ -1,1 +1,17 @@
-start-api.bat
+node_modules/
+dist/
+build/
+
+.env
+.env.*
+*.local.*
+
+DBCONFIG_JSON_LINHAS.txt
+dbconfigs*.json
+
+*- Copia*
+* - Copia*
+index - Copia*.js
+
+.DS_Store
+Thumbs.db
