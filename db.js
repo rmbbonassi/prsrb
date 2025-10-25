@@ -35,10 +35,13 @@ function resolveDbName(cfg, targetDbKey = 'database') {
   return cfg[targetDbKey] || cfg.database;
 }
 
-// -------------------- QUERIES --------------------
+/** -------------------- QUERIES -------------------- **/
+
+// LIVRE (para /query)
 async function queryByClient(dbConfigs, clientId, sqlText, params = {}, targetDbKey = 'database') {
   const cfg = dbConfigs[clientId];
   if (!cfg) { const e = new Error('Cliente não encontrado'); e.status = 400; throw e; }
+
   const dbName = resolveDbName(cfg, targetDbKey);
   if (!dbName) { const e = new Error(`Database não configurada (${targetDbKey}) para clientId=${clientId}`); e.status = 500; throw e; }
 
@@ -52,9 +55,11 @@ async function queryByClient(dbConfigs, clientId, sqlText, params = {}, targetDb
   return req.query(sqlText);
 }
 
+// SEGURA (obriga @id_conta no SQL)
 async function queryByClientForced(dbConfigs, clientId, sqlText, params = {}, targetDbKey = 'database') {
   const cfg = dbConfigs[clientId];
   if (!cfg) { const e = new Error('Cliente não encontrado'); e.status = 400; throw e; }
+
   const idConta = cfg.id_conta;
   if (!idConta) { const e = new Error(`id_conta não definido para clientId=${clientId}`); e.status = 500; throw e; }
 
@@ -74,14 +79,35 @@ async function queryByClientForced(dbConfigs, clientId, sqlText, params = {}, ta
   return req.query(sqlText);
 }
 
-// -------------------- PROCEDURES --------------------
+/** -------------------- PROCEDURES -------------------- **/
+
+// LIVRE (sem injetar id_conta) — usar no LOOKUP spw_RPCMetodoGet
+async function execProcByClient(dbConfigs, clientId, procName, params = {}, targetDbKey = 'database') {
+  const cfg = dbConfigs[clientId];
+  if (!cfg) { const e = new Error('Cliente não encontrado'); e.status = 400; throw e; }
+
+  const dbName = resolveDbName(cfg, targetDbKey);
+  if (!dbName) { const e = new Error(`Database não configurada (${targetDbKey}) para clientId=${clientId}`); e.status = 500; throw e; }
+
+  const pool = await getPool(clientId, cfg, dbName);
+  const req = pool.request();
+
+  for (const [k, def] of Object.entries(params)) {
+    if (def && typeof def === 'object' && 'type' in def) req.input(k, def.type, def.value);
+    else req.input(k, def);
+  }
+  return req.execute(procName);
+}
+
+// SEGURA (injeta @id_conta) — usar na execução da procedure final encontrada
 async function execProcByClientForced(dbConfigs, clientId, procName, params = {}, targetDbKey = 'database') {
   const cfg = dbConfigs[clientId];
   if (!cfg) { const e = new Error('Cliente não encontrado'); e.status = 400; throw e; }
+
   const idConta = cfg.id_conta;
   if (!idConta) { const e = new Error(`id_conta não definido para clientId=${clientId}`); e.status = 500; throw e; }
 
-  // injeta sempre @id_conta (se já vier, sobrescrevemos para garantir a origem)
+  // Garante id_conta SEMPRE do cfg (se já vier no params, sobrescreve)
   params.id_conta = { type: sql.Int, value: Number(idConta) };
 
   const dbName = resolveDbName(cfg, targetDbKey);
@@ -97,4 +123,10 @@ async function execProcByClientForced(dbConfigs, clientId, procName, params = {}
   return req.execute(procName);
 }
 
-module.exports = { sql, queryByClient, queryByClientForced, execProcByClientForced };
+module.exports = {
+  sql,
+  queryByClient,
+  queryByClientForced,
+  execProcByClient,          // <- ESTA É A QUE FALTAVA
+  execProcByClientForced
+};
