@@ -1,6 +1,6 @@
 // index.js
 const express = require('express');
-const { sql, queryByClient, queryByClientForced } = require('./db');
+const { sql, queryByClientForced, execProcByClientForced } = require('./db');
 
 let dbConfigs;
 try {
@@ -16,26 +16,14 @@ const API_SECRET = process.env.API_SECRET;
 
 app.use(express.json());
 
-// ---------- AUTH ----------
+// auth
 app.use((req, res, next) => {
   const token = req.headers['x-api-key'];
   if (token !== API_SECRET) return res.status(401).send('Acesso não autorizado');
   next();
 });
 
-// ---------- HELPERS ----------
-function parseBrDateToISO(dmy) {
-  // 'dd-mm-yyyy' → 'yyyy-mm-dd'
-  if (typeof dmy !== 'string') return null;
-  const m = dmy.match(/^(\d{2})-(\d{2})-(\d{4})$/);
-  if (!m) return null;
-  const [_, dd, mm, yyyy] = m;
-  return `${yyyy}-${mm}-${dd}`;
-}
-function requireBodyKeys(obj, keys) {
-  for (const k of keys) if (!obj || !Object.prototype.hasOwnProperty.call(obj, k)) return k;
-  return null;
-}
+// helpers
 function nonEmptyStr(s, max = 200) {
   if (typeof s !== 'string') return null;
   const t = s.trim();
@@ -43,91 +31,77 @@ function nonEmptyStr(s, max = 200) {
   return t.slice(0, max);
 }
 
-// ---------- HEALTH ----------
+// health (valida fluxo com @id_conta)
 app.get('/healthz', async (req, res) => {
   try {
-    const firstClientId = Object.keys(dbConfigs)[0];
-    if (!firstClientId) return res.json({ ok: true, note: 'sem clientes configurados' });
-
-    // Fazemos um SELECT simples que exige @id_conta (para validar o contrato end-to-end)
+    const first = Object.keys(dbConfigs)[0];
+    if (!first) return res.json({ ok: true, note: 'sem clientes' });
     const r = await queryByClientForced(
       dbConfigs,
-      firstClientId,
+      first,
       'SELECT @id_conta AS id_conta, 1 AS ok WHERE @id_conta IS NOT NULL',
       {},
-      'database'
+      'database-prs' // usa o mesmo DB dos RPCs
     );
     res.json({ ok: true, db: r.recordset[0].ok === 1, id_conta: r.recordset[0].id_conta });
   } catch (e) {
-    console.error('[healthz]', e);
     res.status(500).json({ ok: false, error: e.message });
   }
 });
 
-
-// /query — rota provisória, livre (sem id_conta forçado)
-app.post('/query', async (req, res) => {
-  const { clientId, query, params } = req.body || {};
-  if (!clientId || !query) return res.status(400).send('clientId e query são obrigatórios');
-
+/**
+ * RPC declarativo
+ * Body: { clientId: string, method: string, params?: object }
+ * Fluxo:
+ *   1) lookup: EXEC spw_RPCMetodoGet @metodo      (em 'database-prs')
+ *   2) executa: EXEC <TX_PROC> com @id_conta + params (em 'database-prs')
+ */
+app.post('/v1/rpc', async (req, res) => {
   try {
-    // IMPORTANTE: aqui é query livre — volta a usar o queryByClient ORIGINAL
-    const result = await queryByClient(dbConfigs, clientId, query, params);
-    res.json({ records: result.recordset });
-  } catch (err) {
-    console.error('[query]', err);
-    res.status(err.status || 500).send(err.message || 'Erro interno');
-  }
-});
+    const clientId = nonEmptyStr(req.body?.clientId);
+    const method = nonEmptyStr(req.body?.method, 128);
+    const bodyParams = req.body?.params || {};
 
-// ---------- ENDPOINT FIXO: /v1/get_agendamentos ----------
-app.post('/v1/get_agendamentos', async (req, res) => {
-  const missing = requireBodyKeys(req.body, ['clientId', 'dt_inicio', 'dt_termino']);
-  if (missing) return res.status(400).send(`Campo obrigatório ausente: ${missing}`);
+    if (!clientId) return res.status(400).send('clientId é obrigatório');
+    if (!method) return res.status(400).send('method é obrigatório');
 
-  const clientId   = nonEmptyStr(req.body.clientId);
-  const startISO   = parseBrDateToISO(req.body.dt_inicio);
-  const endISO     = parseBrDateToISO(req.body.dt_termino);
-  const nmUnidade  = req.body.nm_unidade ? nonEmptyStr(req.body.nm_unidade, 120) : null;
+    // (1) lookup via SP fixa
+    const lookupParams = { metodo: { type: sql.VarChar(128), value: method } };
+    const lookup = await execProcByClientForced(dbConfigs, clientId, 'spw_RPCMetodoGet', lookupParams, 'database-prs');
 
-  if (!clientId) return res.status(400).send('clientId inválido');
-  if (!startISO || !endISO) return res.status(400).send('datas devem ser "dd-mm-yyyy"');
+    let procName = null;
+    // Tentativa 1: recordset[0].tx_proc
+    if (lookup?.recordset?.length && lookup.recordset[0].tx_proc) {
+      procName = `${lookup.recordset[0].tx_proc}`.trim();
+    }
+    // Se a SP retorna OUTRA forma (ex.: nested recordsets), adapte aqui.
 
-  let sqlText =
-    `SELECT
-       DT_DATA,
-       TX_DT_HORA_INI,
-       TX_DESCRICAO,
-       TX_MOTIVO,
-       TX_STATUS,
-       TX_UNIDADE_ATENDIMENTO
-     FROM dbo.VW_GR_AGENDA_ITEM
-     WHERE ID_CONTA_REGISTRO = @id_conta
-       AND DT_DATA >= @start
-       AND DT_DATA < DATEADD(day, 1, @end)`;
+    if (!procName) {
+      return res.status(404).send('Procedure não configurada para este método.');
+    }
 
-  const params = {
-    start: { type: sql.Date, value: startISO },
-    end:   { type: sql.Date, value: endISO }
-  };
+    // (2) executa a procedure real com @id_conta + params do body
+    // bodyParams pode conter { k: simpleValue } ou { k: { type, value } }
+    const execParams = {};
+    for (const [k, v] of Object.entries(bodyParams)) {
+      if (v && typeof v === 'object' && 'type' in v) execParams[k] = v;
+      else execParams[k] = { type: undefined, value: v }; // sem tipo explícito
+    }
 
-  if (nmUnidade) {
-    // LIKE opcional: você pode usar igualdade (=) se a coluna não for indexada para LIKE
-    sqlText += ` AND TX_UNIDADE_ATENDIMENTO LIKE @nmUnidade`;
-    params.nmUnidade = { type: sql.VarChar(120), value: nmUnidade };
-  }
+    const result = await execProcByClientForced(dbConfigs, clientId, procName, execParams, 'database-prs');
 
-  sqlText += ` ORDER BY DT_DATA, TX_DT_HORA_INI`;
-
-  try {
-    // Este endpoint usa o DB "database" (troque para 'database-prs' se necessário)
-    const result = await queryByClientForced(dbConfigs, clientId, sqlText, params, 'database');
-    res.json({ records: result.recordset });
+    // Convencionalmente, procedures retornam recordset principal em result.recordset
+    res.json({
+      method,
+      procedure: procName,
+      records: result.recordset ?? [],
+      // Se houver múltiplos recordsets:
+      // allRecordsets: result.recordsets
+    });
   } catch (e) {
-    console.error('[get_agendamentos]', e);
-    res.status(e.status || 500).send(e.message || 'Erro ao consultar agendamentos');
+    console.error('[rpc]', e);
+    res.status(e.status || 500).send(e.message || 'Erro ao executar RPC');
   }
 });
 
-// ---------- START ----------
 app.listen(port, () => console.log(`API rodando na porta ${port}`));
