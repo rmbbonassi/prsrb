@@ -37,7 +37,7 @@ function resolveDbName(cfg, targetDbKey = 'database') {
 
 /** -------------------- QUERIES -------------------- **/
 
-// LIVRE (para /query)
+// LIVRE (para /query interno)
 async function queryByClient(dbConfigs, clientId, sqlText, params = {}, targetDbKey = 'database') {
   const cfg = dbConfigs[clientId];
   if (!cfg) { const e = new Error('Cliente não encontrado'); e.status = 400; throw e; }
@@ -55,7 +55,7 @@ async function queryByClient(dbConfigs, clientId, sqlText, params = {}, targetDb
   return req.query(sqlText);
 }
 
-// SEGURA (obriga @id_conta no SQL)
+// SEGURA (obriga @id_conta no SQL TEXT)
 async function queryByClientForced(dbConfigs, clientId, sqlText, params = {}, targetDbKey = 'database') {
   const cfg = dbConfigs[clientId];
   if (!cfg) { const e = new Error('Cliente não encontrado'); e.status = 400; throw e; }
@@ -99,7 +99,7 @@ async function execProcByClient(dbConfigs, clientId, procName, params = {}, targ
   return req.execute(procName);
 }
 
-// SEGURA (injeta @id_conta) — usar na execução da procedure final encontrada
+// SEGURA (injeta @id_conta) — usar na execução da procedure final (TX_PROC)
 async function execProcByClientForced(dbConfigs, clientId, procName, params = {}, targetDbKey = 'database') {
   const cfg = dbConfigs[clientId];
   if (!cfg) { const e = new Error('Cliente não encontrado'); e.status = 400; throw e; }
@@ -107,7 +107,7 @@ async function execProcByClientForced(dbConfigs, clientId, procName, params = {}
   const idConta = cfg.id_conta;
   if (!idConta) { const e = new Error(`id_conta não definido para clientId=${clientId}`); e.status = 500; throw e; }
 
-  // Garante id_conta SEMPRE do cfg (se já vier no params, sobrescreve)
+  // Garante @id_conta SEMPRE a partir do cfg (se já vier no params, sobrescreve)
   params.id_conta = { type: sql.Int, value: Number(idConta) };
 
   const dbName = resolveDbName(cfg, targetDbKey);
@@ -127,6 +127,6 @@ module.exports = {
   sql,
   queryByClient,
   queryByClientForced,
-  execProcByClient,          // <- ESTA É A QUE FALTAVA
+  execProcByClient,
   execProcByClientForced
 };

@@ -1,6 +1,12 @@
 // index.js
 const express = require('express');
-const { sql, execProcByClient, execProcByClientForced, queryByClientForced } = require('./db');
+const {
+  sql,
+  queryByClient,
+  queryByClientForced,
+  execProcByClient,          // lookup SEM @id_conta
+  execProcByClientForced     // execução final COM @id_conta
+} = require('./db');
 
 let dbConfigs;
 try {
@@ -37,6 +43,7 @@ app.get('/healthz', async (req, res) => {
     const first = Object.keys(dbConfigs)[0];
     if (!first) return res.json({ ok: true, note: 'sem clientes' });
 
+    // valida caminho pelo database-prs (mesmo DB usado no RPC)
     const r = await queryByClientForced(
       dbConfigs,
       first,
@@ -55,51 +62,76 @@ app.get('/healthz', async (req, res) => {
  * RPC — endpoint único
  * Body: { clientId, method, params }
  * Fluxo:
- * 1) Lookup → execProcByClient (SEM id_conta)
- * 2) Execução final → execProcByClientForced (COM id_conta)
+ * 1) Lookup → spw_RPCMetodoGet (SEM @id_conta)  [database-prs]
+ * 2) Execução final → TX_PROC (COM @id_conta)   [database-prs]
  */
 app.post('/v1/rpc', async (req, res) => {
   try {
-    const clientId = nonEmptyStr(req.body?.clientId);
-    const method   = nonEmptyStr(req.body?.method, 128);
+    const clientId   = nonEmptyStr(req.body?.clientId);
+    const method     = nonEmptyStr(req.body?.method, 128);
     const bodyParams = req.body?.params || {};
 
     if (!clientId) return res.status(400).send('clientId é obrigatório');
     if (!method)   return res.status(400).send('method é obrigatório');
 
-    // (1) LOOKUP — chama spw_RPCMetodoGet SEM @id_conta
-    const lookupParams = { metodo: { type: sql.VarChar(128), value: method } };
-    const lookup = await execProcByClient(dbConfigs, clientId, 'spw_RPCMetodoGet', lookupParams, 'database-prs');
+    // (1) LOOKUP — SEM @id_conta (spw_RPCMetodoGet busca por TX_METODO e retorna TX_PROC)
+    const lookupParams = { dado: { type: sql.VarChar(100), value: method } };
+    const lookup = await execProcByClient(
+      dbConfigs,
+      clientId,
+      'spw_RPCMetodoGet',
+      lookupParams,
+      'database-prs'
+    );
 
     let procName = null;
-    if (lookup?.recordset?.length && lookup.recordset[0].tx_proc) {
-      procName = `${lookup.recordset[0].tx_proc}`.trim();
+    if (lookup?.recordset?.length) {
+      // Tabela: TX_METODO = endpoint, TX_PROC = SP real
+      const row = lookup.recordset[0];
+      procName = row.tx_proc ? String(row.tx_proc).trim() : null;
     }
-
     if (!procName) {
       return res.status(404).send('Procedure não configurada para este método.');
     }
 
-    // (2) EXECUÇÃO FINAL — sempre COM @id_conta injetado
+    // (2) EXECUÇÃO — COM @id_conta injetado
+    // bodyParams pode conter { k: valorSimples } ou { k: { type, value } }
     const execParams = {};
     for (const [k, v] of Object.entries(bodyParams)) {
-      execParams[k] = (v && typeof v === 'object' && 'type' in v)
-        ? v
-        : { value: v }; // tipo deixado livre; o SQL fará conversão conforme assinatura da SP
+      execParams[k] = (v && typeof v === 'object' && 'type' in v) ? v : { value: v };
     }
 
-    const result = await execProcByClientForced(dbConfigs, clientId, procName, execParams, 'database-prs');
+    const result = await execProcByClientForced(
+      dbConfigs,
+      clientId,
+      procName,        // TX_PROC (nome da SP real no SQL, schema dbo)
+      execParams,
+      'database-prs'
+    );
 
     res.json({
-      method,
-      procedure: procName,
-      records: result.recordset ?? [],
-      //allRecordsets: result.recordsets // habilite se quiser retornar tudo
+      method,                  // TX_METODO (endpoint)
+      procedure: procName,     // TX_PROC (SP real)
+      records: result.recordset ?? []
+      // allRecordsets: result.recordsets  // habilite se quiser retornar todos os recordsets
     });
 
   } catch (e) {
     console.error('[rpc]', e);
     res.status(e.status || 500).send(e.message || 'Erro ao executar RPC');
+  }
+});
+
+/** -------------------- OPCIONAL: /query livre (interno) -------------------- **/
+app.post('/query', async (req, res) => {
+  const { clientId, query, params, targetDbKey } = req.body || {};
+  if (!clientId || !query) return res.status(400).send('clientId e query são obrigatórios');
+  try {
+    const result = await queryByClient(dbConfigs, clientId, query, params || {}, targetDbKey || 'database');
+    res.json({ records: result.recordset });
+  } catch (err) {
+    console.error('[query]', err);
+    res.status(err.status || 500).send(err.message || 'Erro interno');
   }
 });
 
