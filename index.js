@@ -47,4 +47,47 @@ app.post('/query', async (req, res) => {
   }
 });
 
+// get_agendamentos
+app.post('/v1/get_agendamentos', async (req, res) => {
+  const missing = requireBodyKeys(req.body, ['clientId', 'dt_inicio', 'dt_termino']);
+  if (missing) return res.status(400).send(`Campo obrigatório ausente: ${missing}`);
+
+  const clientId   = nonEmptyStr(req.body.clientId);
+  const startISO   = parseBrDateToISO(req.body.dt_inicio);
+  const endISO     = parseBrDateToISO(req.body.dt_termino);
+  const nmUnidade  = req.body.nm_unidade ? nonEmptyStr(req.body.nm_unidade, 120) : null;
+
+  if (!clientId) return res.status(400).send('clientId inválido');
+  if (!startISO || !endISO) return res.status(400).send('datas devem ser "dd-mm-yyyy"');
+
+  let sqlText =
+    `SELECT
+     DT_DATA,TX_DT_HORA_INI,TX_DESCRICAO,TX_MOTIVO,TX_STATUS,TX_UNIDADE_ATENDIMENTO
+     FROM dbo.VW_GR_AGENDA_ITEM
+     WHERE ID_CONTA_REGISTRO = @id_conta
+     AND DT_DATA >= @start
+     AND DT_DATA < DATEADD(day, 1, @end)`;
+
+  const params = {
+    start: { type: sql.Date, value: startISO },
+    end:   { type: sql.Date, value: endISO }
+  };
+
+  if (nmUnidade) {
+    sqlText += ` AND TX_UNIDADE_ATENDIMENTO LIKE @nmUnidade`;
+    params.nmUnidade = { type: sql.VarChar(120), value: nmUnidade };
+  }
+
+  sqlText += ` ORDER BY DT_DATA,TX_DT_HORA_INI `;
+
+  try {
+    const result = await queryByClientForced(dbConfigs, clientId, sqlText, params, 'database');
+    res.json({ records: result.recordset });
+  } catch (e) {
+    console.error('[get_agendamentos]', e);
+    res.status(e.status || 500).send(e.message || 'Erro ao consultar agendamentos');
+  }
+});
+
 app.listen(port, () => console.log(`API rodando na porta ${port}`));
+
