@@ -4,8 +4,8 @@ const {
   sql,
   queryByClient,
   queryByClientForced,
-  execProcByClient,          // lookup SEM @id_conta
-  execProcByClientForced     // execução final COM @id_conta
+  execProcByClient,
+  execProcByClientForced
 } = require('./db');
 
 let dbConfigs;
@@ -43,7 +43,6 @@ app.get('/healthz', async (req, res) => {
     const first = Object.keys(dbConfigs)[0];
     if (!first) return res.json({ ok: true, note: 'sem clientes' });
 
-    // valida caminho pelo database-prs (mesmo DB usado no RPC)
     const r = await queryByClientForced(
       dbConfigs,
       first,
@@ -60,10 +59,6 @@ app.get('/healthz', async (req, res) => {
 
 /**
  * RPC — endpoint único
- * Body: { clientId, method, params }
- * Fluxo:
- * 1) Lookup → spw_RPCMetodoGet (SEM @id_conta)  [database-prs]
- * 2) Execução final → TX_PROC (COM @id_conta)   [database-prs]
  */
 app.post('/v1/rpc', async (req, res) => {
   try {
@@ -74,7 +69,7 @@ app.post('/v1/rpc', async (req, res) => {
     if (!clientId) return res.status(400).send('clientId é obrigatório');
     if (!method)   return res.status(400).send('method é obrigatório');
 
-    // (1) LOOKUP — SEM @id_conta (spw_RPCMetodoGet busca por TX_METODO e retorna TX_PROC)
+    // (1) LOOKUP — SEM @id_conta
     const lookupParams = { dado: { type: sql.VarChar(100), value: method } };
     const lookup = await execProcByClient(
       dbConfigs,
@@ -86,7 +81,6 @@ app.post('/v1/rpc', async (req, res) => {
 
     let procName = null;
     if (lookup?.recordset?.length) {
-      // Tabela: TX_METODO = endpoint, TX_PROC = SP real
       const row = lookup.recordset[0];
       procName = row.tx_proc ? String(row.tx_proc).trim() : null;
     }
@@ -94,26 +88,33 @@ app.post('/v1/rpc', async (req, res) => {
       return res.status(404).send('Procedure não configurada para este método.');
     }
 
-    // (2) EXECUÇÃO — COM @id_conta injetado
-    // bodyParams pode conter { k: valorSimples } ou { k: { type, value } }
+    // (2) EXECUÇÃO FINAL — COM @id_conta injetado
     const execParams = {};
     for (const [k, v] of Object.entries(bodyParams)) {
-      execParams[k] = (v && typeof v === 'object' && 'type' in v) ? v : { value: v };
+      const raw = (v && typeof v === 'object' && 'value' in v) ? v.value : v;
+      const val = (raw === '' || raw === undefined) ? null : raw;
+
+      if (/^dt_/.test(k)) {
+        execParams[k] = { type: sql.NVarChar(20), value: val };
+      } else if (k === 'nm_unidade') {
+        execParams[k] = { type: sql.NVarChar(120), value: val };
+      } else {
+        execParams[k] = (v && typeof v === 'object' && 'type' in v) ? v : { value: val };
+      }
     }
 
     const result = await execProcByClientForced(
       dbConfigs,
       clientId,
-      procName,        // TX_PROC (nome da SP real no SQL, schema dbo)
+      procName,
       execParams,
       'database-prs'
     );
 
     res.json({
-      method,                  // TX_METODO (endpoint)
-      procedure: procName,     // TX_PROC (SP real)
+      method,
+      procedure: procName,
       records: result.recordset ?? []
-      // allRecordsets: result.recordsets  // habilite se quiser retornar todos os recordsets
     });
 
   } catch (e) {
@@ -122,7 +123,7 @@ app.post('/v1/rpc', async (req, res) => {
   }
 });
 
-/** -------------------- OPCIONAL: /query livre (interno) -------------------- **/
+/** opcional: /query interno */
 app.post('/query', async (req, res) => {
   const { clientId, query, params, targetDbKey } = req.body || {};
   if (!clientId || !query) return res.status(400).send('clientId e query são obrigatórios');
