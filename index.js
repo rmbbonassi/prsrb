@@ -112,9 +112,7 @@ app.post('/v1/rpc', async (req, res) => {
     );
 
     res.json({
-      method,
-      procedure: procName,
-      records: result.recordset ?? []
+	result.recordset ?? []
     });
 
   } catch (e) {
