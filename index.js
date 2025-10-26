@@ -60,12 +60,24 @@ app.get('/healthz', async (req, res) => {
 /**
  * RPC — endpoint único
  * Retorna apenas o recordset (array) da procedure executada
+ *
+ * Body:
+ * {
+ *   "clientId": "....",           // obrigatório
+ *   "method":   "RPCGet...",      // obrigatório (nome do endpoint/TX_METODO)
+ *   "params": { ... }             // opcional (repassado 1:1 para a SP real)
+ * }
+ *
+ * Regras:
+ * - Somente 'clientId' e 'method' são obrigatórios.
+ * - 'params' é opcional e é repassado "como vier" (sem tratamento/conversão).
+ * - Node injeta @id_conta automaticamente ao executar a SP real (TX_PROC).
  */
 app.post('/v1/rpc', async (req, res) => {
   try {
     const clientId   = nonEmptyStr(req.body?.clientId);
     const method     = nonEmptyStr(req.body?.method, 128);
-    const bodyParams = req.body?.params || {};
+    const bodyParams = (req.body?.params && typeof req.body.params === 'object') ? req.body.params : {};
 
     if (!clientId) return res.status(400).send('clientId é obrigatório');
     if (!method)   return res.status(400).send('method é obrigatório');
@@ -89,19 +101,15 @@ app.post('/v1/rpc', async (req, res) => {
       return res.status(404).send('Procedure não configurada para este método.');
     }
 
-    // (2) EXECUÇÃO FINAL — COM @id_conta injetado
+    // (2) EXECUÇÃO FINAL — COM @id_conta; demais params repassados 1:1
+    // Se o cliente mandar { k: {type, value} }, usamos como está.
+    // Se mandar { k: valorSimples }, passamos { value: valorSimples } sem tipagem/transformação.
     const execParams = {};
     for (const [k, v] of Object.entries(bodyParams)) {
-      const raw = (v && typeof v === 'object' && 'value' in v) ? v.value : v;
-      const val = (raw === '' || raw === undefined) ? null : raw;
-
-      if (/^dt_/.test(k)) {
-        execParams[k] = { type: sql.NVarChar(20), value: val };
-      } else if (k === 'nm_unidade') {
-        execParams[k] = { type: sql.NVarChar(120), value: val };
-      } else {
-        execParams[k] = (v && typeof v === 'object' && 'type' in v) ? v : { value: val };
-      }
+      execParams[k] =
+        (v && typeof v === 'object' && ('type' in v || 'value' in v))
+          ? v
+          : { value: v };
     }
 
     const result = await execProcByClientForced(
@@ -112,7 +120,7 @@ app.post('/v1/rpc', async (req, res) => {
       'database-prs'
     );
 
-    // ✅ retorna somente os dados (array)
+    // retorna somente os dados (array)
     res.json(result.recordset ?? []);
 
   } catch (e) {
