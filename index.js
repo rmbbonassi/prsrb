@@ -109,7 +109,7 @@ app.post('/v1/rpc', async (req, res) => {
       execParams[k] =
         (v && typeof v === 'object' && ('type' in v || 'value' in v))
           ? v
-          : { value: v };
+          : { type: sql.NVarChar, value: v };
     }
 
     const result = await execProcByClientForced(
