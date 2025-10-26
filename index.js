@@ -59,6 +59,7 @@ app.get('/healthz', async (req, res) => {
 
 /**
  * RPC — endpoint único
+ * Retorna apenas o recordset (array) da procedure executada
  */
 app.post('/v1/rpc', async (req, res) => {
   try {
@@ -111,9 +112,8 @@ app.post('/v1/rpc', async (req, res) => {
       'database-prs'
     );
 
-    res.json({
-	result.recordset ?? []
-    });
+    // ✅ retorna somente os dados (array)
+    res.json(result.recordset ?? []);
 
   } catch (e) {
     console.error('[rpc]', e);
