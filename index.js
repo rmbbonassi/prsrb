@@ -61,15 +61,15 @@ app.get('/healthz', async (req, res) => {
  * RPC — endpoint único
  * Body:
  * {
- *   "clientId": "....",
- *   "method":   "RPCGetAgendamentos",
- *   "params": { "id_chave": 123, ...demais params livres... }
+ *   "clientId": "....",           ← obrigatório
+ *   "method":   "RPCGet...",      ← obrigatório (nome do endpoint/TX_METODO)
+ *   "params": { ... }             ← opcional (repassado 1:1 para a SP real)
  * }
  *
  * Regras:
- * - 'id_chave' dentro de 'params' é OBRIGATÓRIO (não é tipado nem transformado)
- * - Demais parâmetros são repassados como vierem (sem tratamento)
- * - Node injeta @id_conta automaticamente na execução da SP real
+ * - Somente 'clientId' e 'method' são obrigatórios.
+ * - 'params' é opcional e é repassado "como vier" (sem tratamento).
+ * - Node injeta @id_conta automaticamente ao executar a SP real (TX_PROC).
  */
 app.post('/v1/rpc', async (req, res) => {
   try {
@@ -80,12 +80,7 @@ app.post('/v1/rpc', async (req, res) => {
     if (!clientId) return res.status(400).send('clientId é obrigatório');
     if (!method)   return res.status(400).send('method é obrigatório');
 
-    // valida obrigatoriedade de id_chave dentro de params (sem tipar/transformar)
-    if (!Object.prototype.hasOwnProperty.call(bodyParams, 'id_chave')) {
-      return res.status(400).send('params.id_chave é obrigatório');
-    }
-
-    // (1) LOOKUP — SEM @id_conta (spw_RPCMetodoGet busca TX_METODO e retorna TX_PROC)
+    // (1) LOOKUP — SEM @id_conta (spw_RPCMetodoGet busca por TX_METODO e retorna TX_PROC)
     const lookupParams = { dado: { type: sql.VarChar(100), value: method } };
     const lookup = await execProcByClient(
       dbConfigs,
@@ -104,9 +99,8 @@ app.post('/v1/rpc', async (req, res) => {
       return res.status(404).send('Procedure não configurada para este método.');
     }
 
-    // (2) EXECUÇÃO FINAL — COM @id_conta (demais params repassados "como vieram")
-    // Se o cliente mandar { k: {type, value} }, usamos como está.
-    // Se mandar { k: valorSimples }, passamos { value: valorSimples } sem tipar.
+    // (2) EXECUÇÃO FINAL — COM @id_conta; demais params repassados 1:1
+    // Se params vier como {k:{type,value}}, usa direto; se vier valor simples, vira {value: ...}
     const execParams = {};
     for (const [k, v] of Object.entries(bodyParams)) {
       execParams[k] = (v && typeof v === 'object' && ('type' in v || 'value' in v))
