@@ -4,8 +4,8 @@ const {
   sql,
   queryByClient,
   queryByClientForced,
-  execProcByClient,
-  execProcByClientForced
+  execProcByClient,          // lookup SEM @id_conta
+  execProcByClientForced     // execução final COM @id_conta
 } = require('./db');
 
 let dbConfigs;
@@ -59,18 +59,33 @@ app.get('/healthz', async (req, res) => {
 
 /**
  * RPC — endpoint único
- * Retorna apenas o recordset (array) da procedure executada
+ * Body:
+ * {
+ *   "clientId": "....",
+ *   "method":   "RPCGetAgendamentos",
+ *   "params": { "id_chave": 123, ...demais params livres... }
+ * }
+ *
+ * Regras:
+ * - 'id_chave' dentro de 'params' é OBRIGATÓRIO (não é tipado nem transformado)
+ * - Demais parâmetros são repassados como vierem (sem tratamento)
+ * - Node injeta @id_conta automaticamente na execução da SP real
  */
 app.post('/v1/rpc', async (req, res) => {
   try {
     const clientId   = nonEmptyStr(req.body?.clientId);
     const method     = nonEmptyStr(req.body?.method, 128);
-    const bodyParams = req.body?.params || {};
+    const bodyParams = (req.body?.params && typeof req.body.params === 'object') ? req.body.params : {};
 
     if (!clientId) return res.status(400).send('clientId é obrigatório');
     if (!method)   return res.status(400).send('method é obrigatório');
 
-    // (1) LOOKUP — SEM @id_conta
+    // valida obrigatoriedade de id_chave dentro de params (sem tipar/transformar)
+    if (!Object.prototype.hasOwnProperty.call(bodyParams, 'id_chave')) {
+      return res.status(400).send('params.id_chave é obrigatório');
+    }
+
+    // (1) LOOKUP — SEM @id_conta (spw_RPCMetodoGet busca TX_METODO e retorna TX_PROC)
     const lookupParams = { dado: { type: sql.VarChar(100), value: method } };
     const lookup = await execProcByClient(
       dbConfigs,
@@ -89,30 +104,25 @@ app.post('/v1/rpc', async (req, res) => {
       return res.status(404).send('Procedure não configurada para este método.');
     }
 
-    // (2) EXECUÇÃO FINAL — COM @id_conta injetado
+    // (2) EXECUÇÃO FINAL — COM @id_conta (demais params repassados "como vieram")
+    // Se o cliente mandar { k: {type, value} }, usamos como está.
+    // Se mandar { k: valorSimples }, passamos { value: valorSimples } sem tipar.
     const execParams = {};
     for (const [k, v] of Object.entries(bodyParams)) {
-      const raw = (v && typeof v === 'object' && 'value' in v) ? v.value : v;
-      const val = (raw === '' || raw === undefined) ? null : raw;
-
-      if (/^dt_/.test(k)) {
-        execParams[k] = { type: sql.NVarChar(20), value: val };
-      } else if (k === 'nm_unidade') {
-        execParams[k] = { type: sql.NVarChar(120), value: val };
-      } else {
-        execParams[k] = (v && typeof v === 'object' && 'type' in v) ? v : { value: val };
-      }
+      execParams[k] = (v && typeof v === 'object' && ('type' in v || 'value' in v))
+        ? v
+        : { value: v };
     }
 
     const result = await execProcByClientForced(
       dbConfigs,
       clientId,
-      procName,
+      procName,        // TX_PROC (nome da SP real, schema dbo)
       execParams,
       'database-prs'
     );
 
-    // ✅ retorna somente os dados (array)
+    // retorna apenas os dados (array)
     res.json(result.recordset ?? []);
 
   } catch (e) {
