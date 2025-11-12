@@ -1,4 +1,3 @@
-// index.js
 const express = require('express');
 const {
   sql,
@@ -60,18 +59,6 @@ app.get('/healthz', async (req, res) => {
 /**
  * RPC — endpoint único
  * Retorna apenas o recordset (array) da procedure executada
- *
- * Body:
- * {
- *   "clientId": "....",           // obrigatório
- *   "method":   "RPCGet...",      // obrigatório (nome do endpoint/TX_METODO)
- *   "params": { ... }             // opcional (repassado 1:1 para a SP real)
- * }
- *
- * Regras:
- * - Somente 'clientId' e 'method' são obrigatórios.
- * - 'params' é opcional e é repassado "como vier" (sem tratamento/conversão).
- * - Node injeta @id_conta automaticamente ao executar a SP real (TX_PROC).
  */
 app.post('/v1/rpc', async (req, res) => {
   try {
@@ -102,8 +89,6 @@ app.post('/v1/rpc', async (req, res) => {
     }
 
     // (2) EXECUÇÃO FINAL — COM @id_conta; demais params repassados 1:1
-    // Se o cliente mandar { k: {type, value} }, usamos como está.
-    // Se mandar { k: valorSimples }, passamos { value: valorSimples } sem tipagem/transformação.
     const execParams = {};
     for (const [k, v] of Object.entries(bodyParams)) {
       execParams[k] =
@@ -120,7 +105,33 @@ app.post('/v1/rpc', async (req, res) => {
       'database-prs'
     );
 
-    // retorna somente os dados (array)
+    // ------------------------------------------------------------------
+    // 🔹 DETECÇÃO AUTOMÁTICA DE XML (TISS)
+    // ------------------------------------------------------------------
+    const row0 = result?.recordset?.[0];
+    const firstColName = row0 ? Object.keys(row0)[0] : null;
+    const firstVal = firstColName ? row0[firstColName] : '';
+
+    // nome da procedure em minúsculas
+    const procLower = (procName || '').toLowerCase();
+
+    // detecta XML automaticamente
+    const isXml =
+      procLower.includes('tiss') ||
+      (typeof firstVal === 'string' &&
+       (firstVal.startsWith('<?xml') ||
+        firstVal.startsWith('<ans:mensagemTISS') ||
+        firstVal.trim().startsWith('<')));
+
+    if (isXml) {
+      // devolve XML puro (sem escapar aspas)
+      res.set('Content-Type', 'application/xml; charset=ISO-8859-1');
+      return res.send(Buffer.from(String(firstVal || ''), 'latin1'));
+    }
+
+    // ------------------------------------------------------------------
+    // JSON padrão (para todos os outros métodos)
+    // ------------------------------------------------------------------
     res.json(result.recordset ?? []);
 
   } catch (e) {
@@ -129,7 +140,7 @@ app.post('/v1/rpc', async (req, res) => {
   }
 });
 
-/** opcional: /query interno */
+// ---------- /query interno ----------
 app.post('/query', async (req, res) => {
   const { clientId, query, params, targetDbKey } = req.body || {};
   if (!clientId || !query) return res.status(400).send('clientId e query são obrigatórios');
@@ -142,4 +153,5 @@ app.post('/query', async (req, res) => {
   }
 });
 
+// ---------- START ----------
 app.listen(port, () => console.log(`API rodando na porta ${port}`));
